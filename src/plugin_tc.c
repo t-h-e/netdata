@@ -68,6 +68,7 @@ struct tc_device {
     char enabled_dropped;
     char enabled_tokens;
     char enabled_ctokens;
+    char enabled_all_classes;
 
     RRDSET *st_bytes;
     RRDSET *st_packets;
@@ -183,7 +184,7 @@ static inline void tc_device_classes_cleanup(struct tc_device *d) {
 }
 
 static inline void tc_device_commit(struct tc_device *d) {
-    static int enable_new_interfaces = -1, enable_bytes = -1, enable_packets = -1, enable_dropped = -1, enable_tokens = -1, enable_ctokens = -1;
+    static int enable_new_interfaces = -1, enable_bytes = -1, enable_packets = -1, enable_dropped = -1, enable_tokens = -1, enable_ctokens = -1, enabled_all_classes = -1;
 
     if(unlikely(enable_new_interfaces == -1)) {
         enable_new_interfaces = config_get_boolean_ondemand("plugin:tc", "enable new interfaces detected at runtime", CONFIG_ONDEMAND_YES);
@@ -192,6 +193,7 @@ static inline void tc_device_commit(struct tc_device *d) {
         enable_dropped        = config_get_boolean_ondemand("plugin:tc", "enable dropped charts for all interfaces", CONFIG_ONDEMAND_ONDEMAND);
         enable_tokens         = config_get_boolean_ondemand("plugin:tc", "enable tokens charts for all interfaces", CONFIG_ONDEMAND_NO);
         enable_ctokens        = config_get_boolean_ondemand("plugin:tc", "enable ctokens charts for all interfaces", CONFIG_ONDEMAND_NO);
+        enabled_all_classes   = config_get_boolean_ondemand("plugin:tc", "enable show all classes for all interfaces", CONFIG_ONDEMAND_NO);
     }
 
     // we only need to add leaf classes
@@ -228,7 +230,7 @@ static inline void tc_device_commit(struct tc_device *d) {
     /*
     if(unlikely(debug_flags & D_TC_LOOP)) {
         for(c = d->classes ; c ; c = c->next) {
-            if(c->isleaf && c->hasparent) debug(D_TC_LOOP, "TC: Device '%s', class %s, OK", d->name, c->id);
+            if((c->isleaf && c->hasparent) || d->enabled_all_classes) debug(D_TC_LOOP, "TC: Device '%s', class %s, OK", d->name, c->id);
             else debug(D_TC_LOOP, "TC: Device '%s', class %s, IGNORE (isleaf: %d, hasparent: %d, parent: %s)", d->name?d->name:d->id, c->id, c->isleaf, c->hasparent, c->parentid?c->parentid:"(unset)");
         }
     }
@@ -237,7 +239,7 @@ static inline void tc_device_commit(struct tc_device *d) {
     // we need at least a class
     for(c = d->classes ; c ; c = c->next) {
         // debug(D_TC_LOOP, "TC: Device '%s', class '%s', isLeaf=%d, HasParent=%d, Seen=%d", d->name?d->name:d->id, c->name?c->name:c->id, c->isleaf, c->hasparent, c->seen);
-        if(unlikely(c->updated && c->isleaf && c->hasparent)) {
+        if(unlikely(c->updated && ((c->isleaf && c->hasparent) || d->enabled_all_classes))) {
             active_classes++;
             bytes_sum += c->bytes;
             packets_sum += c->packets;
@@ -272,6 +274,9 @@ static inline void tc_device_commit(struct tc_device *d) {
 
         snprintfz(var_name, CONFIG_MAX_NAME, "ctokens chart for %s", d->id);
         d->enabled_ctokens = config_get_boolean_ondemand("plugin:tc", var_name, enable_ctokens);
+
+        snprintfz(var_name, CONFIG_MAX_NAME, "show all classes for %s", d->id);
+        d->enabled_all_classes = config_get_boolean_ondemand("plugin:tc", var_name, enabled_all_classes);
     }
 
     debug(D_TC_LOOP, "TC: evaluating TC device '%s'. enabled = %d/%d (bytes: %d/%d, packets: %d/%d, dropped: %d/%d, tokens: %d/%d, ctokens: %d/%d), classes = %d (bytes = %llu, packets = %llu, dropped = %llu, tokens = %llu, ctokens = %llu).",
@@ -282,6 +287,7 @@ static inline void tc_device_commit(struct tc_device *d) {
         d->enabled_dropped, enable_dropped,
         d->enabled_tokens, enable_tokens,
         d->enabled_ctokens, enable_ctokens,
+        d->enabled_all_classes, enabled_all_classes,
         active_classes,
         bytes_sum,
         packets_sum,
@@ -320,7 +326,7 @@ static inline void tc_device_commit(struct tc_device *d) {
             for(c = d->classes ; c ; c = c->next) {
                 if(unlikely(!c->updated)) continue;
 
-                if(c->isleaf && c->hasparent) {
+                if((c->isleaf && c->hasparent) || d->enabled_all_classes) {
                     c->seen++;
 
                     if(unlikely(!c->rd_bytes)) {
@@ -376,7 +382,7 @@ static inline void tc_device_commit(struct tc_device *d) {
             for(c = d->classes ; c ; c = c->next) {
                 if(unlikely(!c->updated)) continue;
 
-                if(c->isleaf && c->hasparent) {
+                if((c->isleaf && c->hasparent) || d->enabled_all_classes) {
                     if(unlikely(!c->rd_packets)) {
                         c->rd_packets = rrddim_find(d->st_packets, c->id);
                         if(unlikely(!c->rd_packets)) {
@@ -430,7 +436,7 @@ static inline void tc_device_commit(struct tc_device *d) {
             for(c = d->classes ; c ; c = c->next) {
                 if(unlikely(!c->updated)) continue;
 
-                if(c->isleaf && c->hasparent) {
+                if((c->isleaf && c->hasparent) || d->enabled_all_classes) {
                     if(unlikely(!c->rd_dropped)) {
                         c->rd_dropped = rrddim_find(d->st_dropped, c->id);
                         if(unlikely(!c->rd_dropped)) {
@@ -484,7 +490,7 @@ static inline void tc_device_commit(struct tc_device *d) {
             for(c = d->classes ; c ; c = c->next) {
                 if(unlikely(!c->updated)) continue;
 
-                if(c->isleaf && c->hasparent) {
+                if((c->isleaf && c->hasparent) || d->enabled_all_classes) {
                     if(unlikely(!c->rd_tokens)) {
                         c->rd_tokens = rrddim_find(d->st_tokens, c->id);
                         if(unlikely(!c->rd_tokens)) {
@@ -538,7 +544,7 @@ static inline void tc_device_commit(struct tc_device *d) {
             for(c = d->classes ; c ; c = c->next) {
                 if(unlikely(!c->updated)) continue;
 
-                if(c->isleaf && c->hasparent) {
+                if((c->isleaf && c->hasparent) || d->enabled_all_classes) {
                     if(unlikely(!c->rd_ctokens)) {
                         c->rd_ctokens = rrddim_find(d->st_ctokens, c->id);
                         if(unlikely(!c->rd_ctokens)) {
