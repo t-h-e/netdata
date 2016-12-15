@@ -101,6 +101,7 @@ show_tc() {
     local x="${1}" interface_dev interface_classes interface_classes_monitor
 
     echo "BEGIN ${x}"
+    ${tc} -s qdisc show dev ${x}
     ${tc} -s class show dev ${x}
 
     # check FireQOS names for classes
@@ -125,7 +126,7 @@ show_tc() {
 all_devices() {
     cat /proc/net/dev | grep ":" | cut -d ':' -f 1 | while read dev
     do
-        l=$(${tc} class show dev ${dev} | wc -l)
+        l=$(${tc} qdisc show dev ${dev} | wc -l)
         [ $l -ne 0 ] && echo ${dev}
     done
 }

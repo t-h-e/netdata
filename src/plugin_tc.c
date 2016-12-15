@@ -25,6 +25,7 @@ struct tc_class {
 
     char hasparent;
     char isleaf;
+    char isqdisc;
     unsigned long long bytes;
     unsigned long long packets;
     unsigned long long dropped;
@@ -236,10 +237,11 @@ static inline void tc_device_commit(struct tc_device *d) {
     }
     */
 
-    // we need at least a class
+    // we need the root qdisc
     for(c = d->classes ; c ; c = c->next) {
         // debug(D_TC_LOOP, "TC: Device '%s', class '%s', isLeaf=%d, HasParent=%d, Seen=%d", d->name?d->name:d->id, c->name?c->name:c->id, c->isleaf, c->hasparent, c->seen);
-        if(unlikely(c->updated && ((c->isleaf && c->hasparent) || d->enabled_all_classes))) {
+        debug(D_TC_LOOP, "TC: Device '%s', class '%s', isleaf=%s, hasparent=%s bytes=%d, packtes=%d, dropped=%d, tokens=%d, ctokens=%d", d->name?d->name:d->id, c->name?c->name:c->id, c->isleaf?"true":"false", c->hasparent?"true":"false", c->bytes, c->packets, c->dropped, c->tokens, c->ctokens);
+        if(unlikely(c->updated && c->isqdisc && !c->hasparent)) {
             active_classes++;
             bytes_sum += c->bytes;
             packets_sum += c->packets;
@@ -640,7 +642,7 @@ static inline struct tc_device *tc_device_create(char *id)
     return(d);
 }
 
-static inline struct tc_class *tc_class_add(struct tc_device *n, char *id, char *parentid, char *leafid)
+static inline struct tc_class *tc_class_add(struct tc_device *n, char *id, char qdisc, char *parentid, char *leafid)
 {
     struct tc_class *c = tc_class_index_find(n, id, 0);
 
@@ -656,6 +658,7 @@ static inline struct tc_class *tc_class_add(struct tc_device *n, char *id, char 
         c->id = strdupz(id);
         c->hash = simple_hash(c->id);
 
+        c->isqdisc = qdisc;
         if(parentid && *parentid) {
             c->parentid = strdupz(parentid);
             c->parent_hash = simple_hash(c->parentid);
@@ -769,6 +772,7 @@ void *tc_main(void *ptr) {
 
     uint32_t BEGIN_HASH = simple_hash("BEGIN");
     uint32_t END_HASH = simple_hash("END");
+    uint32_t QDISC_HASH = simple_hash("qdisc");
     uint32_t CLASS_HASH = simple_hash("class");
     uint32_t SENT_HASH = simple_hash("Sent");
     uint32_t LENDED_HASH = simple_hash("lended:");
@@ -818,7 +822,7 @@ void *tc_main(void *ptr) {
 
             first_hash = simple_hash(words[0]);
 
-            if(unlikely(device && first_hash == CLASS_HASH && strcmp(words[0], "class") == 0)) {
+            if(unlikely(device && ((first_hash == CLASS_HASH && strcmp(words[0], "class") == 0) ||  (first_hash == QDISC_HASH && strcmp(words[0], "qdisc") == 0)))) {
                 // debug(D_TC_LOOP, "CLASS line on class id='%s', parent='%s', parentid='%s', leaf='%s', leafid='%s'", words[2], words[3], words[4], words[5], words[6]);
 
                 // words[1] : class type
@@ -835,7 +839,11 @@ void *tc_main(void *ptr) {
                     char *parentid = words[4];  // the parent's id
                     char *leaf     = words[5];  // 'leaf'
                     char *leafid   = words[6];  // leafid
+                    char qdisc = 0;
 
+                    if(strcmp(words[0], "qdisc") == 0) {
+                        qdisc = 1;
+                    }
                     if(strcmp(parent, "root") == 0) {
                         parentid = NULL;
                         leafid = NULL;
@@ -850,7 +858,7 @@ void *tc_main(void *ptr) {
                         leafid = leafbuf;
                     }
 
-                    class = tc_class_add(device, id, parentid, leafid);
+                    class = tc_class_add(device, id, qdisc, parentid, leafid);
                 }
                 else {
                     // clear the last class
